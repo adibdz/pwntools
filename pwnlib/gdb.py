@@ -237,13 +237,14 @@ def _gdbserver_args(pid=None, path=None, args=None, which=None, env=None):
     if pid:
         gdbserver_args += ['--once', '--attach']
 
-    if env:
+    if env is not None:
         env_args = []
         for key in tuple(env):
             if key.startswith('LD_'): # LD_PRELOAD / LD_LIBRARY_PATH etc.
                 env_args.append('{}={}'.format(key, env.pop(key)))
-        if env_args:
-            gdbserver_args += ['--wrapper', 'env'] + env_args + ['--']
+            else:
+                env_args.append('{}={}'.format(key, env[key]))
+        gdbserver_args += ['--wrapper', 'env', '-i'] + env_args + ['--']
 
     gdbserver_args += ['localhost:0']
     gdbserver_args += args
@@ -399,7 +400,7 @@ def debug(args, gdbscript=None, exe=None, ssh=None, env=None, sysroot=None, **kw
     >>> io.interactive() # doctest: +SKIP
     >>> io.close()
     """
-    if isinstance(args, (int, tubes.process.process, tubes.ssh.ssh_channel)):
+    if isinstance(args, six.integer_types + (tubes.process.process, tubes.ssh.ssh_channel)):
         log.error("Use gdb.attach() to debug a running process")
 
     if isinstance(args, (bytes, six.text_type)):
@@ -496,7 +497,7 @@ def binary():
 
         if multiarch:
             return multiarch
-        log.warn_once('Cross-architecture debugging usually requires gdb-multiarch\n' \
+        log.warn_once('Cross-architecture debugging usually requires gdb-multiarch\n'
                       '$ apt-get install gdb-multiarch')
 
     if not gdb:
@@ -983,7 +984,7 @@ def corefile(process):
     # This is effectively the same as what the 'gcore' binary does
     gdb_args = ['-batch',
                 '-q',
-                '--nx',
+                '-nx',
                 '-ex', '"set pagination off"',
                 '-ex', '"set height 0"',
                 '-ex', '"set width 0"',
@@ -994,7 +995,14 @@ def corefile(process):
     with context.local(terminal = ['sh', '-c']):
         with context.quiet:
             pid = attach(process, gdb_args=gdb_args)
-            os.waitpid(pid, 0)
+            log.debug("Got GDB pid %d", pid)
+            try:
+                os.waitpid(pid, 0)
+            except Exception:
+                pass
+
+    if not os.path.exists(corefile_path):
+        log.error("Could not generate a corefile for process %d", process.pid)
 
     return elf.corefile.Core(corefile_path)
 

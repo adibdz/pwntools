@@ -834,14 +834,13 @@ class FmtStr(object):
 
     """
 
-    def __init__(self, execute_fmt, offset = None, padlen = 0, numbwritten = 0):
+    def __init__(self, execute_fmt, offset=None, padlen=0, numbwritten=0):
         self.execute_fmt = execute_fmt
         self.offset = offset
         self.padlen = padlen
         self.numbwritten = numbwritten
 
-
-        if self.offset == None:
+        if self.offset is None:
             self.offset, self.padlen = self.find_offset()
             log.info("Found format string offset: %d", self.offset)
 
@@ -903,7 +902,7 @@ class FmtStr(object):
 
         """
         fmtstr = randoms(self.padlen).encode()
-        fmtstr += fmtstr_payload(self.offset, self.writes, numbwritten=self.padlen, write_size='byte')
+        fmtstr += fmtstr_payload(self.offset, self.writes, numbwritten=self.padlen + self.numbwritten, write_size='byte')
         self.execute_fmt(fmtstr)
         self.writes = {}
 

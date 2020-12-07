@@ -42,9 +42,12 @@ from six.moves import range
 
 from pwnlib.context import LocalNoarchContext
 from pwnlib.context import context
+from pwnlib.log import getLogger
+
 from pwnlib.util import iters
 
 mod = sys.modules[__name__]
+log = getLogger(__name__)
 
 def pack(number, word_size = None, endianness = None, sign = None, **kwargs):
     """pack(number, word_size = None, endianness = None, sign = None, **kwargs) -> str
@@ -113,7 +116,7 @@ def pack(number, word_size = None, endianness = None, sign = None, **kwargs):
         if not isinstance(number, six.integer_types):
             raise ValueError("pack(): number must be of type (int,long) (got %r)" % type(number))
 
-        if sign not in [True, False]:
+        if not isinstance(sign, bool):
             raise ValueError("pack(): sign must be either True or False (got %r)" % sign)
 
         if endianness not in ['little', 'big']:
@@ -124,18 +127,18 @@ def pack(number, word_size = None, endianness = None, sign = None, **kwargs):
             if number == 0:
                 word_size = 8
             elif number > 0:
-                if sign == False:
-                    word_size = ((number.bit_length() - 1) | 7) + 1
-                else:
+                if sign:
                     word_size = (number.bit_length() | 7) + 1
+                else:
+                    word_size = ((number.bit_length() - 1) | 7) + 1
             else:
-                if sign == False:
+                if not sign:
                     raise ValueError("pack(): number does not fit within word_size")
                 word_size = ((number + 1).bit_length() | 7) + 1
         elif not isinstance(word_size, six.integer_types) or word_size <= 0:
             raise ValueError("pack(): word_size must be a positive integer or the string 'all'")
 
-        if sign == True:
+        if sign:
             limit = 1 << (word_size-1)
             if not -limit <= number < limit:
                 raise ValueError("pack(): number does not fit within word_size")
@@ -487,6 +490,7 @@ def make_unpacker(word_size = None, endianness = None, sign = None, **kwargs):
         return lambda number: unpack(number, word_size, endianness, sign)
 
 def _fit(pieces, preprocessor, packer, filler):
+
     # Pulls bytes from `filler` and adds them to `pad` until it ends in `key`.
     # Returns the index of `key` in `pad`.
     pad = bytearray()
@@ -524,6 +528,14 @@ def _fit(pieces, preprocessor, packer, filler):
 
     # Build output
     out = b''
+
+    # Negative indices need to be removed and then re-submitted
+    negative = {k:v for k,v in pieces.items() if isinstance(k, int) and k<0}
+
+    for k in negative:
+        del pieces[k]
+
+    # Positive output
     for k, v in sorted(pieces.items()):
         if k < len(out):
             raise ValueError("flat(): data at offset %d overlaps with previous data which ends at offset %d" % (k, len(out)))
@@ -535,7 +547,24 @@ def _fit(pieces, preprocessor, packer, filler):
         # Recursively flatten data
         out += _flat([v], preprocessor, packer, filler)
 
-    return filler, out
+    # Now do negative indices
+    out_negative = b''
+    if negative:
+        most_negative = min(negative.keys())
+        for k, v in sorted(negative.items()):
+            k += -most_negative
+
+            if k < len(out_negative):
+                raise ValueError("flat(): data at offset %d overlaps with previous data which ends at offset %d" % (k, len(out)))
+
+            # Fill up to offset
+            while len(out_negative) < k:
+                out_negative += p8(next(filler))
+
+            # Recursively flatten data
+            out_negative += _flat([v], preprocessor, packer, filler)
+
+    return filler, out_negative + out
 
 def _flat(args, preprocessor, packer, filler):
     out = []
@@ -543,7 +572,7 @@ def _flat(args, preprocessor, packer, filler):
 
         if not isinstance(arg, (list, tuple, dict)):
             arg_ = preprocessor(arg)
-            if arg_ != None:
+            if arg_ is not None:
                 arg = arg_
 
         if hasattr(arg, '__flat__'):
@@ -559,7 +588,7 @@ def _flat(args, preprocessor, packer, filler):
         elif isinstance(arg, six.integer_types):
             val = packer(arg)
         elif isinstance(arg, bytearray):
-            val = str(arg)
+            val = bytes(arg)
         else:
             raise ValueError("flat(): Flat does not support values of type %s" % type(arg))
 
@@ -714,6 +743,12 @@ def flat(*args, **kwargs):
         b'aaaaXaaaY'
         >>> fit({4: {4: 'XXXX'}})
         b'aaaabaaaXXXX'
+
+        Negative indices are also supported, though this only works for integer
+        keys.
+    
+        >>> flat({-4: 'x', -1: 'A', 0: '0', 4:'y'})
+        b'xaaA0aaay'
     """
     # HACK: To avoid circular imports we need to delay the import of `cyclic`
     from pwnlib.util import cyclic
@@ -964,3 +999,6 @@ def dd(dst, src, count = 0, skip = 0, seek = 0, truncate = False):
         dst = dst.decode('utf8')
 
     return dst
+
+del op, size, end, sign
+del name, routine, mod

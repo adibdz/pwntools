@@ -9,6 +9,7 @@ import psutil
 
 from pwnlib import tubes
 from pwnlib.log import getLogger
+from .net import sock_match
 from pwnlib.timeout import Timeout
 
 log = getLogger(__name__)
@@ -42,29 +43,20 @@ def pidof(target):
         return [target.pid]
 
     elif isinstance(target, tubes.sock.sock):
-         local  = target.sock.getsockname()
-         remote = target.sock.getpeername()
-
-         def match(c):
-             return (c.raddr, c.laddr, c.status) == (local, remote, 'ESTABLISHED')
-
-         return [c.pid for c in psutil.net_connections() if match(c)]
+        local  = target.sock.getsockname()
+        remote = target.sock.getpeername()
+        match = sock_match(remote, local, target.family, target.type)
+        return [c.pid for c in psutil.net_connections() if match(c)]
 
     elif isinstance(target, tuple):
-        host, port = target
-
-        host = socket.gethostbyname(host)
-
-        def match(c):
-            return c.raddr == (host, port)
-
+        match = sock_match(None, target)
         return [c.pid for c in psutil.net_connections() if match(c)]
 
     elif isinstance(target, tubes.process.process):
-         return [target.proc.pid]
+        return [target.proc.pid]
 
     else:
-         return pid_by_name(target)
+        return pid_by_name(target)
 
 def pid_by_name(name):
     """pid_by_name(name) -> int list

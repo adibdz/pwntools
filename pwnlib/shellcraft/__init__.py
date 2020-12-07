@@ -142,8 +142,11 @@ class module(ModuleType):
         return constants.eval(item)
 
     def pretty(self, n, comment=True):
-        if isinstance(n, str):
-            return repr(n)
+        if isinstance(n, (str, bytes, list, tuple, dict)):
+            r = repr(n)
+            if not comment:  # then it can be inside a comment!
+                r = r.replace('*/', r'\x2a/')
+            return r
         if not isinstance(n, six.integer_types):
             return n
         if isinstance(n, constants.Constant):
@@ -155,7 +158,7 @@ class module(ModuleType):
             return hex(n)
 
     def okay(self, s, *a, **kw):
-        if isinstance(s, int):
+        if isinstance(s, six.integer_types):
             s = packing.pack(s, *a, **kw)
         return b'\0' not in s and b'\n' not in s
 
